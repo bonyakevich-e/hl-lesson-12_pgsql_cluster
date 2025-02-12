@@ -25,8 +25,6 @@ $ ansible-playbook -i hosts playbook.yml
 
 ![image](https://github.com/user-attachments/assets/7897223a-326d-49cd-aff8-de3e5387cbef)
 
-![image](https://github.com/user-attachments/assets/7a18cba8-b3da-488f-9373-67a36c5690b3)
-
 При падении одного из серверов баз данных, лидером становится второй:
 
 ![image](https://github.com/user-attachments/assets/c1e28646-6b9d-4adf-9b57-b554736186a7)
@@ -35,4 +33,6 @@ HAProxy начинает пересылать запросы на database2:
 
 ![image](https://github.com/user-attachments/assets/6d5ef9d2-b052-4039-855e-fde7396eaa16)
 
-Сервис Nextcloud продолжает работать
+Сервис Nextcloud продолжает работать:
+
+![image](https://github.com/user-attachments/assets/7a18cba8-b3da-488f-9373-67a36c5690b3)
