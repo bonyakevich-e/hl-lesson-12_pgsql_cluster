@@ -1,0 +1,331 @@
+---
+- hosts: all
+  tags: initial settings
+  remote_user: ${remote_user}
+  become: yes
+  gather_facts: no
+  tasks:
+  
+# ждем пока виртуальные машины придут в себя. иначе могу быть баги с утановкой пакетов  
+  - name: Pause for 2 minutes
+    ansible.builtin.pause:
+      minutes: 2
+
+  - name: Wait for system to become reachable
+    ansible.builtin.wait_for_connection:
+
+  - name: Gather facts manually
+    ansible.builtin.setup:
+  
+  - name: Set timezone
+    timezone:
+      name: Europe/Moscow
+  
+  - name: Add entries to hosts
+    copy:
+      dest: /etc/hosts
+      content: "#\n
+127.0.0.1	localhost\n
+%{ for node in backend ~}
+${node.network_interface.0.ip_address}	${node.hostname}\n
+%{ endfor ~}
+%{ for node in database ~}
+${node.network_interface.0.ip_address}	${node.hostname}\n
+%{ endfor ~}
+"
+
+# =============================== setup etcd =================================
+
+- hosts: etcd
+  tags: setup etcd
+  remote_user: ${remote_user}
+  become: yes
+  tasks: 
+
+  - name: Update apt cache
+    tags: update apt cache
+    ansible.builtin.apt: 
+      update_cache: yes
+  
+  - name: Install etcd
+    tags: install etcd
+    ansible.builtin.unarchive:
+      src: https://cloud.baltbereg.com/index.php/s/nTHrb3ABA9YbxtS/download/etcd-v3.5.18-linux-amd64.tar.gz
+      dest: /tmp/
+      remote_src: yes
+
+  - name: Copy etcd binaries to /usr/local/bin
+    ansible.builtin.copy:
+      src: "/tmp/etcd-v3.5.18-linux-amd64/{{ item }}"
+      dest: /usr/local/bin
+      remote_src: yes
+      mode: '0755'
+    with_items:
+      - etcd
+      - etcdctl
+      - etcdutl
+      
+  - name: Create etcd system group
+    tags: create etcd system group
+    ansible.builtin.group:
+      name: etcd
+      state: present
+      system: yes
+
+  - name: Create etcd user
+    tags: create etcd user
+    ansible.builtin.user:
+      name: etcd
+      group: etcd
+      system: yes
+      shell: /sbin/nologin
+
+  - name: Create /var/lib/etcd/
+    tags: create /var/lib/etcd/
+    ansible.builtin.file:
+      path: /var/lib/etcd/
+      state: directory
+      owner: etcd
+      group: etcd
+      mode: '0755'
+
+  - name: Create /etc/etcd
+    ansible.builtin.file:
+      path: /etc/etcd
+      state: directory  
+
+  - name: Copy systemd unit etcd.service
+    ansible.builtin.copy:
+      src: templates/etcd/etcd.service
+      dest: /etc/systemd/system/etcd.service
+
+  - name: Copy etcd config
+    tags: copy etcd config
+    ansible.builtin.copy:
+      src: templates/etcd/etcd.conf_{{ inventory_hostname }}
+      dest: /etc/etcd/etcd.conf
+
+  - name: Start etcd
+    tags: start etcd
+    ansible.builtin.service:
+      name: etcd
+      state: restarted
+      enabled: yes
+
+# ============================ setup database ===================
+
+- hosts: database
+  tags: setup database
+  remote_user: ${remote_user}
+  become: yes
+  tasks:
+
+  - name: Generate an OpenSSH keypair with the default values (4096 bits, rsa)
+    community.crypto.openssh_keypair:
+      path: /root/.ssh/id_rsa
+
+  - name: Install additional packages
+    ansible.builtin.apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: true
+    with_items:
+      - python3-pip
+      - python3-dev
+      - libpq-dev
+
+  - name: Install PostgreSQL
+    ansible.builtin.apt: 
+      name: "{{ item }}"
+      state: present
+      update_cache: yes
+    with_items:
+      - postgresql
+      - postgresql-contrib
+      - postgresql-client-16
+      - postgresql-server-dev-16
+
+  - name: Install Patroni
+    ansible.builtin.pip: 
+      name: "{{ item }}"
+      break_system_packages: true
+    with_items:
+      - patroni
+      - python-etcd
+      - psycopg2
+      
+  - name: Disable postgresql autorun (it will be made by patroni)
+    tags: disable postgresql
+    ansible.builtin.service:
+      name: postgresql
+      state: stopped
+      enabled: no
+  
+  - name: Remove initial config, that was created by postgresql
+    tags: remove initial config
+    ansible.builtin.file:
+      path: /var/lib/postgresql/16/main
+      state: absent
+
+  - name: Create patroni config directory
+    tags: create patroni config directory
+    ansible.builtin.file:
+      path: /etc/patroni
+      state: directory
+      owner: postgres
+      group: postgres
+      mode: '0755'
+
+  - name: Copy patroni service file
+    tags: copy patroni service file
+    ansible.builtin.copy:
+      src: templates/database/patroni.service
+      dest: /etc/systemd/system/patroni.service  
+
+  - name: Copy patroni configuration
+    tags: copy patroni config
+    ansible.builtin.copy:
+      src: templates/database/patroni.yml_{{inventory_hostname}}
+      dest: /etc/patroni/patroni.yml
+      owner: postgres
+      group: postgres
+      mode: '0755'
+
+  - name: Start and enable patroni
+    tags: start patroni
+    ansible.builtin.service:
+      name: patroni
+      state: started
+      enabled: yes
+
+# =============================== setup backend servers ======================
+
+- hosts: backend
+  tags: setup backends
+  remote_user: ${remote_user}
+  become: yes
+  tasks:
+  
+  - name: Install prerequisites
+    apt:
+      name: "{{ item }}"
+      state: latest
+      update_cache: true
+    with_items:
+      - apache2
+      - libapache2-mod-php
+      - php-gd
+      - php-mysql
+      - php-curl
+      - php-mbstring
+      - php-intl
+      - php-gmp
+      - php-bcmath
+      - php-xml
+      - php-imagick
+      - php-zip
+      - php-pgsql
+      - haproxy
+      - postgresql-client-16
+      - bzip2
+    notify: restart apache2
+
+  - name: Enable recommended apache modules
+    tags: enable_apache2_modules_web1
+    community.general.apache2_module:
+      state: present
+      name: "{{ item }}" 
+    with_items:
+      - rewrite
+      - headers
+      - env
+      - dir
+      - mime
+    notify: restart apache2
+  
+  - name: enable apache2 service
+    ansible.builtin.service:
+      name: apache2
+      enabled: true
+
+  - name: modify apache2.conf
+    ansible.builtin.template:
+      src: templates/apache2.conf
+      dest: /etc/apache2/apache2.conf
+    notify:
+      - restart apache2
+
+  - name: add vhost for nextcloud
+    ansible.builtin.template:
+      src: nextcloud.conf.j2
+      dest: /etc/apache2/sites-available/nextcloud.conf
+    notify:
+      - enable nextcloud vhost
+      - restart apache2
+
+  - name: Copy haproxy config
+    tags: copy haproxy config
+    ansible.builtin.copy:
+      src: templates/backend/haproxy.cfg
+      dest: /etc/haproxy/haproxy.cfg
+
+  - name: Start haproxy
+    tags: start haproxy
+    ansible.builtin.service:
+      name: haproxy
+      state: restarted
+      enabled: yes  
+
+  handlers:
+  - name: enable nextcloud vhost
+    ansible.builtin.shell: /usr/sbin/a2ensite nextcloud.conf
+
+  - name: restart apache2
+    ansible.builtin.service:
+      name: apache2
+      state: restarted
+
+# =============================== setup Nextcloud  ======================
+
+- hosts: backend
+  tags: setup nextcloud
+  remote_user: ubuntu
+  become: yes
+  tasks:
+
+  - name: Extact nextcloud-30.0.4.tar.bz2 into storage directory
+    ansible.builtin.unarchive:
+      src: https://cloud.baltbereg.com/index.php/s/K7gXPYBEpc9Ygkw/download/nextcloud-30.0.4.tar.bz2
+      dest: /var/www
+      remote_src: yes
+
+  - name: Change nextcloud files' owner
+    ansible.builtin.file:
+      path: /var/www/nextcloud
+      state: directory
+      recurse: yes
+      owner: www-data
+      group: www-data
+
+  - name: Copy .sql file
+    tags: copy sql file
+    ansible.builtin.copy:
+      src: templates/database/nextcloud.sql
+      dest: /tmp
+
+  - name: Execute .sql file
+    tags: execute sql file
+    ansible.builtin.shell: 'PGPASSWORD=OtusHL psql -Upostgres -hlocalhost -p5000 < /tmp/nextcloud.sql' 
+
+  - name: make initial configuration of Nextcloud
+    command: sudo -u www-data php occ  maintenance:install --database-host='localhost:5000' --database='pgsql' --database-name='nextcloud' --database-user='nextcloud' --database-pass='OtusHL' --admin-user='admin' --admin-pass='OtusHL'
+    args: 
+      chdir: /var/www/nextcloud
+
+  - name: add trusted domains to nextcloud config.php
+    tags: add trusted domains
+    ansible.builtin.lineinfile:
+      path: /var/www/nextcloud/config/config.php
+      insertafter: 0 => 'localhost',
+      line: "    1 => 'otus.highload.com',"
+

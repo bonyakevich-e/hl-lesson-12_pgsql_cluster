@@ -1,0 +1,20 @@
+[Unit]
+Description=Etcd - Highly Available Key Value Store
+Documentation=man:etcd
+After=network.target
+Wants=network-online.target
+
+[Service]
+Environment=DAEMON_ARGS=
+Environment=ETCD_NAME=%H
+Environment=ETCD_DATA_DIR=/var/lib/etcd/default
+EnvironmentFile=/etc/etcd/etcd.conf
+Type=notify
+User=etcd
+PermissionsStartOnly=true
+ExecStart=/usr/local/bin/etcd
+Restart=on-abnormal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

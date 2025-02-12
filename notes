@@ -1,0 +1,25 @@
+patronictl -c /etc/patroni/patroni.yml list - состояние postregsql кластера
+patronictl -c /etc/patroni.yml reinit postgres <node-name> - рециинилизация ноды
+patronictl -c /etc/patroni.yml failover postgres --candidate <node-name> - ручной фейловер
+
+etcdctl member list - состояние etcd кластера
+
+После установки postgresql он автоматически запускается. Нам это не нужно, потому что запуском и настройкой postersql будет заниматься patroni. Поэтому мы 
+деактивируем postgresql и удаляем файлы, которые он создал при первом запуске. А после настраиваем и поднимаем patroni (см. плейбук)
+
+проверить подключение к БД через haproxy из backendа:
+psql -Upostgres -hlocalhost -p5000 -t -c "select inet_server_addr()"
+
+удалить базу и пользователя nextcloud:
+DROP database nextcloud;
+DROP OWNED by nextcloud;
+DROP USER nextcloud;
+
+удаленное подключение к postgre:
+PGPASSWORD=OtusHL psql -Upostgres -hlocalhost -p5000
+
+удаленный запуск команд с .sql файла:
+PGPASSWORD=OtusHL psql -Upostgres -hlocalhost -p5000 < nextcloud.sql
+
+удаленный запуск команд:
+PGPASSWORD=OtusHL psql -Upostgres -hlocalhost -p5000 -c "DROP DATABASE nextcloud"
