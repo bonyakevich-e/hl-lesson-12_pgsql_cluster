@@ -5,7 +5,8 @@
 #### ВЫПОЛНЕНИЕ:
 Схема стенда:
 
-![otus highload scheme v5 patroni](https://github.com/user-attachments/assets/c9d2c5cf-5e02-4290-b2a5-425ee125c8b1)
+![otus highload scheme v5 patroni](https://github.com/user-attachments/assets/dd32cf71-c27f-4e72-bf35-89a6cf3b4084)
+
 
 Стенд собирается с помощью команд:
 ```
