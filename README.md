@@ -35,3 +35,4 @@ HAProxy начинает пересылать запросы на database2:
 
 ![image](https://github.com/user-attachments/assets/6d5ef9d2-b052-4039-855e-fde7396eaa16)
 
+Сервис Nextcloud продолжает работать
